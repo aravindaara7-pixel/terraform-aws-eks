@@ -2,107 +2,87 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = "ap-south-1"
-        ECR_REGISTRY = "336359748215.dkr.ecr.ap-south-1.amazonaws.com"
+        AWS_REGION     = "ap-south-1"
+        ECR_REGISTRY   = "336359748215.dkr.ecr.ap-south-1.amazonaws.com"
         ECR_REPOSITORY = "terraform-aws-eks"
-        IMAGE_NAME = "terraform-aws-eks"
-        IMAGE_TAG = "v1"
-        CLUSTER_NAME = "multi-env-eks"
+        IMAGE_TAG      = "v1"
+        CLUSTER_NAME   = "multi-env-eks"
     }
 
     stages {
 
         stage('Clone Repository') {
-           steps {
-              git branch: 'master',
-                url: 'https://github.com/aravindaara7-pixel/terraform-aws-eks.git'
-          }
-      }
-  
-        stage('Build Docker Image') {
             steps {
-                sh '''
-                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
-                '''
+                git 'https://github.com/aravindaara7-pixel/terraform-aws-eks.git'
             }
         }
 
-        stage('Login to Amazon ECR') {
+        stage('Build Docker Image') {
             steps {
-                sh '''
-                aws ecr get-login-password --region ${AWS_REGION} | \
-                docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                '''
+                sh 'docker build -t terraform-aws-eks:v1 .'
+            }
+        }
+
+        stage('AWS Login') {
+            steps {
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
+
+                    sh '''
+                    aws sts get-caller-identity
+
+                    aws ecr get-login-password --region ap-south-1 | \
+                    docker login \
+                    --username AWS \
+                    --password-stdin \
+                    336359748215.dkr.ecr.ap-south-1.amazonaws.com
+                    '''
+                }
             }
         }
 
         stage('Tag Docker Image') {
             steps {
                 sh '''
-                docker tag ${IMAGE_NAME}:${IMAGE_TAG} \
-                ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+                docker tag terraform-aws-eks:v1 \
+                336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks:v1
                 '''
             }
         }
 
-        stage('Push Docker Image to Amazon ECR') {
+        stage('Push Docker Image') {
             steps {
                 sh '''
-                docker push ${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+                docker push \
+                336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks:v1
                 '''
             }
         }
 
         stage('Configure Kubernetes') {
             steps {
-                sh '''
-                aws eks update-kubeconfig \
-                --region ${AWS_REGION} \
-                --name ${CLUSTER_NAME}
-                '''
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
+
+                    sh '''
+                    aws eks update-kubeconfig \
+                    --region ap-south-1 \
+                    --name multi-env-eks
+                    '''
+                }
             }
         }
 
-        stage('Deploy to Kubernetes') {
-            steps {
-                sh '''
-                kubectl apply -f ecr-deployment/namespace.yaml
-                kubectl apply -f ecr-deployment/deployment.yaml
-                kubectl apply -f ecr-deployment/service.yaml
-                kubectl apply -f ecr-deployment/ingress.yaml
-                '''
-            }
-        }
-
-        stage('Verify Deployment') {
+        stage('Verify Cluster') {
             steps {
                 sh '''
                 kubectl get nodes
-                kubectl get deployments -n dev
-                kubectl get pods -n dev
-                kubectl get svc -n dev
-                kubectl get ingress -n dev
                 '''
             }
-        }
-    }
-
-    post {
-        success {
-            echo "========================================"
-            echo "CI/CD Pipeline Executed Successfully"
-            echo "Repository Cloned"
-            echo "Docker Image Built"
-            echo "Image Pushed to Amazon ECR"
-            echo "Application Deployed to Amazon EKS"
-            echo "========================================"
-        }
-
-        failure {
-            echo "========================================"
-            echo "CI/CD Pipeline Failed"
-            echo "Please check the Jenkins Console Output"
-            echo "========================================"
         }
     }
 }
