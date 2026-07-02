@@ -13,12 +13,12 @@ pipeline {
     stages {
 
         stage('Clone Repository') {
-            steps {
-                git branch: 'main',
-                    url: 'https://github.com/aravindaara7-pixel/terraform-aws-eks.git'
-            }
-        }
-
+           steps {
+              git branch: 'master',
+                url: 'https://github.com/aravindaara7-pixel/terraform-aws-eks.git'
+          }
+      }
+  
         stage('Build Docker Image') {
             steps {
                 sh '''
