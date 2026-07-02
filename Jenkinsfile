@@ -2,11 +2,12 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = "ap-south-1"
-        ECR_REPO = "336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks"
-        IMAGE_NAME = "terraform-aws-eks"
-        IMAGE_TAG = "v1"
-        CLUSTER_NAME = "multi-env-eks"
+        AWS_REGION  = 'ap-south-1'
+        ACCOUNT_ID  = '336359748215'
+        ECR_REPO    = '336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks'
+        IMAGE_NAME  = 'terraform-aws-eks'
+        IMAGE_TAG   = 'v1'
+        CLUSTER_NAME = 'multi-env-eks'
     }
 
     stages {
@@ -21,35 +22,33 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                 '''
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('AWS Login') {
             steps {
-                withCredentials([[
-                   $class: 'AmazonWebServicesCredentialsBinding',
-                   credentialsId: 'aws-credentials'
-                ]]) {
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
                     sh '''
-                    kubectl apply -f deployment.yaml
-                    kubectl apply -f service.yaml
+                        aws sts get-caller-identity
 
-                    kubectl rollout status deployment/terraform-aws-eks -n dev
-
-                    kubectl get deployments -n dev
-                    kubectl get pods -n dev
-                    kubectl get svc -n dev
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login \
+                        --username AWS \
+                        --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                     '''
-           }
-         }
-   }
+                }
+            }
+        }
 
         stage('Tag Docker Image') {
             steps {
                 sh '''
-                docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
+                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
                 '''
             }
         }
@@ -57,24 +56,23 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 sh '''
-                docker push ${ECR_REPO}:${IMAGE_TAG}
+                    docker push ${ECR_REPO}:${IMAGE_TAG}
                 '''
             }
         }
 
         stage('Configure Kubernetes') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
-                ]]) {
-
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
                     sh '''
-                    aws eks update-kubeconfig \
-                    --region ${AWS_REGION} \
-                    --name ${CLUSTER_NAME}
+                        aws eks update-kubeconfig \
+                        --region ${AWS_REGION} \
+                        --name ${CLUSTER_NAME}
 
-                    kubectl config current-context
+                        kubectl config current-context
                     '''
                 }
             }
@@ -82,14 +80,13 @@ pipeline {
 
         stage('Verify Cluster') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
-                ]]) {
-
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
                     sh '''
-                    kubectl get nodes
-                    kubectl get namespaces
+                        kubectl get nodes
+                        kubectl get namespaces
                     '''
                 }
             }
@@ -97,18 +94,19 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
-                ]]) {
-
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
                     sh '''
-                    kubectl apply -f deployment.yaml
-                    kubectl apply -f service.yaml
+                        kubectl apply -f deployment.yaml
+                        kubectl apply -f service.yaml
 
-                    kubectl rollout status deployment/terraform-aws-eks
-                    kubectl get pods
-                    kubectl get svc
+                        kubectl rollout status deployment/terraform-aws-eks -n dev
+
+                        kubectl get deployments -n dev
+                        kubectl get pods -n dev
+                        kubectl get svc -n dev
                     '''
                 }
             }
@@ -118,18 +116,18 @@ pipeline {
     post {
 
         success {
-            echo "=================================="
+            echo "======================================="
             echo "Pipeline completed successfully!"
-            echo "Docker image pushed to ECR."
-            echo "Application deployed to EKS."
-            echo "=================================="
+            echo "Docker image pushed to Amazon ECR."
+            echo "Application deployed to Amazon EKS."
+            echo "======================================="
         }
 
         failure {
-            echo "=================================="
+            echo "======================================="
             echo "Pipeline failed."
-            echo "Check the stage logs above."
-            echo "=================================="
+            echo "Please check the stage logs."
+            echo "======================================="
         }
 
         always {
