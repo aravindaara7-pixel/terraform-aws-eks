@@ -2,42 +2,44 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION     = "ap-south-1"
-        ECR_REGISTRY   = "336359748215.dkr.ecr.ap-south-1.amazonaws.com"
-        ECR_REPOSITORY = "terraform-aws-eks"
-        IMAGE_TAG      = "v1"
-        CLUSTER_NAME   = "multi-env-eks"
+        AWS_REGION = "ap-south-1"
+        ECR_REPO = "336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks"
+        IMAGE_NAME = "terraform-aws-eks"
+        IMAGE_TAG = "v1"
+        CLUSTER_NAME = "multi-env-eks"
     }
 
     stages {
 
         stage('Clone Repository') {
             steps {
-                git 'https://github.com/aravindaara7-pixel/terraform-aws-eks.git'
+                git branch: 'master',
+                    url: 'https://github.com/aravindaara7-pixel/terraform-aws-eks.git'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t terraform-aws-eks:v1 .'
+                sh '''
+                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                '''
             }
         }
 
         stage('AWS Login') {
             steps {
-                withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials']
-                ]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
 
                     sh '''
                     aws sts get-caller-identity
 
-                    aws ecr get-login-password --region ap-south-1 | \
+                    aws ecr get-login-password --region ${AWS_REGION} | \
                     docker login \
                     --username AWS \
-                    --password-stdin \
-                    336359748215.dkr.ecr.ap-south-1.amazonaws.com
+                    --password-stdin ${ECR_REPO%/*}
                     '''
                 }
             }
@@ -46,8 +48,7 @@ pipeline {
         stage('Tag Docker Image') {
             steps {
                 sh '''
-                docker tag terraform-aws-eks:v1 \
-                336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks:v1
+                docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
                 '''
             }
         }
@@ -55,23 +56,24 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 sh '''
-                docker push \
-                336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks:v1
+                docker push ${ECR_REPO}:${IMAGE_TAG}
                 '''
             }
         }
 
         stage('Configure Kubernetes') {
             steps {
-                withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials']
-                ]) {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
 
                     sh '''
                     aws eks update-kubeconfig \
-                    --region ap-south-1 \
-                    --name multi-env-eks
+                    --region ${AWS_REGION} \
+                    --name ${CLUSTER_NAME}
+
+                    kubectl config current-context
                     '''
                 }
             }
@@ -79,10 +81,58 @@ pipeline {
 
         stage('Verify Cluster') {
             steps {
-                sh '''
-                kubectl get nodes
-                '''
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+
+                    sh '''
+                    kubectl get nodes
+                    kubectl get namespaces
+                    '''
+                }
             }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+
+                    sh '''
+                    kubectl apply -f deployment.yaml
+                    kubectl apply -f service.yaml
+
+                    kubectl rollout status deployment/terraform-aws-eks
+                    kubectl get pods
+                    kubectl get svc
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo "=================================="
+            echo "Pipeline completed successfully!"
+            echo "Docker image pushed to ECR."
+            echo "Application deployed to EKS."
+            echo "=================================="
+        }
+
+        failure {
+            echo "=================================="
+            echo "Pipeline failed."
+            echo "Check the stage logs above."
+            echo "=================================="
+        }
+
+        always {
+            sh 'docker image prune -f || true'
         }
     }
 }
