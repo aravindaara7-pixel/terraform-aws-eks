@@ -26,24 +26,25 @@ pipeline {
             }
         }
 
-        stage('AWS Login') {
+        stage('Deploy to Kubernetes') {
             steps {
                 withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials'
+                   $class: 'AmazonWebServicesCredentialsBinding',
+                   credentialsId: 'aws-credentials'
                 ]]) {
-
                     sh '''
-                    aws sts get-caller-identity
+                    kubectl apply -f deployment.yaml
+                    kubectl apply -f service.yaml
 
-                    aws ecr get-login-password --region ${AWS_REGION} | \
-                    docker login \
-                    --username AWS \
-                    --password-stdin ${ECR_REPO%/*}
+                    kubectl rollout status deployment/terraform-aws-eks -n dev
+
+                    kubectl get deployments -n dev
+                    kubectl get pods -n dev
+                    kubectl get svc -n dev
                     '''
-                }
-            }
-        }
+           }
+         }
+   }
 
         stage('Tag Docker Image') {
             steps {
