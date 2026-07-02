@@ -6,8 +6,9 @@ pipeline {
         ACCOUNT_ID   = '336359748215'
         ECR_REPO     = '336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks'
         IMAGE_NAME   = 'terraform-aws-eks'
-        IMAGE_TAG    = "v1"
+        IMAGE_TAG    = "${BUILD_NUMBER}"
         CLUSTER_NAME = 'multi-env-eks'
+
         RELEASE_NAME = 'terraform-app'
         NAMESPACE    = 'dev'
         CHART_PATH   = './terraform-aws-eks-chart'
@@ -25,7 +26,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
-                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                 '''
             }
         }
@@ -37,12 +38,12 @@ pipeline {
                     credentialsId: 'aws-credentials']
                 ]) {
                     sh '''
-                        aws sts get-caller-identity
+                    aws sts get-caller-identity
 
-                        aws ecr get-login-password --region ${AWS_REGION} | \
-                        docker login \
-                        --username AWS \
-                        --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                    docker login \
+                    --username AWS \
+                    --password-stdin ${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
                     '''
                 }
             }
@@ -51,7 +52,7 @@ pipeline {
         stage('Tag Docker Image') {
             steps {
                 sh '''
-                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
+                docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REPO}:${IMAGE_TAG}
                 '''
             }
         }
@@ -59,7 +60,7 @@ pipeline {
         stage('Push Docker Image') {
             steps {
                 sh '''
-                    docker push ${ECR_REPO}:${IMAGE_TAG}
+                docker push ${ECR_REPO}:${IMAGE_TAG}
                 '''
             }
         }
@@ -71,11 +72,11 @@ pipeline {
                     credentialsId: 'aws-credentials']
                 ]) {
                     sh '''
-                        aws eks update-kubeconfig \
+                    aws eks update-kubeconfig \
                         --region ${AWS_REGION} \
                         --name ${CLUSTER_NAME}
 
-                        kubectl config current-context
+                    kubectl config current-context
                     '''
                 }
             }
@@ -83,16 +84,25 @@ pipeline {
 
         stage('Verify Cluster') {
             steps {
-                sh '''
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
+                    sh '''
                     kubectl get nodes
                     kubectl get namespaces
-                '''
+                    '''
+                }
             }
         }
 
         stage('Deploy using Helm') {
             steps {
-                sh '''
+                withCredentials([
+                    [$class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials']
+                ]) {
+                    sh '''
                     helm version
 
                     helm upgrade --install ${RELEASE_NAME} ${CHART_PATH} \
@@ -103,30 +113,32 @@ pipeline {
 
                     kubectl rollout status deployment/${IMAGE_NAME} -n ${NAMESPACE}
 
+                    kubectl get deployments -n ${NAMESPACE}
                     kubectl get pods -n ${NAMESPACE}
                     kubectl get svc -n ${NAMESPACE}
                     kubectl get ingress -n ${NAMESPACE}
 
                     helm list -n ${NAMESPACE}
-                '''
+                    '''
+                }
             }
         }
     }
 
     post {
-
         success {
-            echo "========================================="
-            echo "Docker Image Built Successfully"
-            echo "Image Pushed to Amazon ECR"
-            echo "Application Deployed using Helm"
-            echo "========================================="
+            echo "====================================="
+            echo "Pipeline completed successfully!"
+            echo "Docker image pushed to Amazon ECR."
+            echo "Application deployed using Helm."
+            echo "====================================="
         }
 
         failure {
-            echo "========================================="
-            echo "Pipeline Failed"
-            echo "========================================="
+            echo "====================================="
+            echo "Pipeline Failed."
+            echo "Check Jenkins logs."
+            echo "====================================="
         }
 
         always {
