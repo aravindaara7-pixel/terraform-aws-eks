@@ -2,12 +2,15 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION  = 'ap-south-1'
-        ACCOUNT_ID  = '336359748215'
-        ECR_REPO    = '336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks'
-        IMAGE_NAME  = 'terraform-aws-eks'
-        IMAGE_TAG   = 'v1'
+        AWS_REGION   = 'ap-south-1'
+        ACCOUNT_ID   = '336359748215'
+        ECR_REPO     = '336359748215.dkr.ecr.ap-south-1.amazonaws.com/terraform-aws-eks'
+        IMAGE_NAME   = 'terraform-aws-eks'
+        IMAGE_TAG    = "v1"
         CLUSTER_NAME = 'multi-env-eks'
+        RELEASE_NAME = 'terraform-app'
+        NAMESPACE    = 'dev'
+        CHART_PATH   = './terraform-aws-eks-chart'
     }
 
     stages {
@@ -80,35 +83,32 @@ pipeline {
 
         stage('Verify Cluster') {
             steps {
-                withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials']
-                ]) {
-                    sh '''
-                        kubectl get nodes
-                        kubectl get namespaces
-                    '''
-                }
+                sh '''
+                    kubectl get nodes
+                    kubectl get namespaces
+                '''
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Deploy using Helm') {
             steps {
-                withCredentials([
-                    [$class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-credentials']
-                ]) {
-                    sh '''
-                        kubectl apply -f deployment.yaml
-                        kubectl apply -f service.yaml
+                sh '''
+                    helm version
 
-                        kubectl rollout status deployment/terraform-aws-eks -n dev
+                    helm upgrade --install ${RELEASE_NAME} ${CHART_PATH} \
+                        --namespace ${NAMESPACE} \
+                        --create-namespace \
+                        --set image.repository=${ECR_REPO} \
+                        --set image.tag=${IMAGE_TAG}
 
-                        kubectl get deployments -n dev
-                        kubectl get pods -n dev
-                        kubectl get svc -n dev
-                    '''
-                }
+                    kubectl rollout status deployment/${IMAGE_NAME} -n ${NAMESPACE}
+
+                    kubectl get pods -n ${NAMESPACE}
+                    kubectl get svc -n ${NAMESPACE}
+                    kubectl get ingress -n ${NAMESPACE}
+
+                    helm list -n ${NAMESPACE}
+                '''
             }
         }
     }
@@ -116,18 +116,17 @@ pipeline {
     post {
 
         success {
-            echo "======================================="
-            echo "Pipeline completed successfully!"
-            echo "Docker image pushed to Amazon ECR."
-            echo "Application deployed to Amazon EKS."
-            echo "======================================="
+            echo "========================================="
+            echo "Docker Image Built Successfully"
+            echo "Image Pushed to Amazon ECR"
+            echo "Application Deployed using Helm"
+            echo "========================================="
         }
 
         failure {
-            echo "======================================="
-            echo "Pipeline failed."
-            echo "Please check the stage logs."
-            echo "======================================="
+            echo "========================================="
+            echo "Pipeline Failed"
+            echo "========================================="
         }
 
         always {
